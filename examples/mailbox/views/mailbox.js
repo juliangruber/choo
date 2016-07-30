@@ -17,6 +17,6 @@ module.exports = function (state, prev, send) {
   `
 
   function goHome () {
-    send('location:setLocation', { location: '/'})
+    send('location:set', { pathname: '/' })
   }
 }

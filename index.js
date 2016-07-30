@@ -1,10 +1,9 @@
-const history = require('sheet-router/history')
+const onHistoryChange = require('sheet-router/history')
+const onHashChange = require('sheet-router/hash')
 const sheetRouter = require('sheet-router')
 const document = require('global/document')
+const onHref = require('sheet-router/href')
 const onReady = require('document-ready')
-const href = require('sheet-router/href')
-const hash = require('sheet-router/hash')
-const hashMatch = require('hash-match')
 const barracks = require('barracks')
 const nanoraf = require('nanoraf')
 const assert = require('assert')
@@ -65,7 +64,7 @@ function choo (opts) {
     }
     startOpts = startOpts || {}
 
-    _store.model(appInit(startOpts))
+    _store.model(createLocationModel(startOpts))
     const createSend = _store.start(startOpts)
     _router = start._router = createRouter(_defaultRoute, _routes, createSend)
     const state = _store.state({state: {}})
@@ -143,56 +142,52 @@ function choo (opts) {
   }
 }
 
-// initial application state model
+// application location model
 // obj -> obj
-function appInit (opts) {
-  const loc = document.location
-  const state = { pathname: (opts.hash) ? hashMatch(loc.hash) : loc.href }
+function createLocationModel (opts) {
+  const state = createLocation(null, document.location)
 
   // allow listening to hash changes
   // allow listening to browser back / forward buttons
   // allow listening to anchor tag clicks
   const subs = {}
-  if (opts.hash === true) {
-    subs.handleHash = function (send, done) {
-      hash(function navigate (pathname) {
-        pathname = hashMatch(pathname)
-        send('location:setLocation', { location: pathname }, done)
+  if (opts.history !== false) {
+    subs.handleHistory = function (send, done) {
+      onHistoryChange(function navigate (pathname) {
+        send('location:set', { pathname: pathname }, done)
       })
     }
-  } else {
-    if (opts.history !== false) {
-      subs.handleHistory = function (send, done) {
-        history(function navigate (pathname) {
-          send('location:setLocation', { location: pathname }, done)
-        })
-      }
-    }
 
-    if (opts.href !== false) {
-      subs.handleHref = function (send, done) {
-        href(function navigate (pathname) {
-          send('location:setLocation', { location: pathname }, done)
-        })
-      }
+    subs.handleHash = function (send, done) {
+      onHashChange(function navigate (hashname) {
+        send('location:set', { hash: hashname }, done)
+      })
+    }
+  }
+
+  if (opts.href !== false) {
+    subs.handleHref = function (send, done) {
+      onHref(function navigate (pathname) {
+        send('location:set', { pathname: pathname }, done)
+      })
     }
   }
 
   const effects = {
-    setLocation: function setLocation (data, state, send, done) {
-      const href = data.location.replace(/#.*/, '')
+    set: function setLocation (patch, state, send, done) {
+      const location = createLocation(state, patch)
 
-      if (!opts.history) return done()
-      if (window.location.pathname === href) return done()
+      if (opts.history !== false && location.href !== state.href) {
+        window.history.pushState({}, null, location.href)
+      }
 
-      window.history.pushState({}, null, href)
-      send('location:updateHref', href, done)
+      send('location:update', location, done)
     }
   }
 
   const reducers = {
-    updateHref: function (data, state) {
-      return { pathname: data }
+    update: function (location, state) {
+      return location
     }
   }
 
@@ -202,5 +197,50 @@ function appInit (opts) {
     reducers: reducers,
     effects: effects,
     state: state
+  }
+}
+
+// takes an initial representation of the location state
+// and then synchronize a mutation across all fields
+// (obj, str|obj?) -> obj
+function createLocation (state, patch) {
+  if (!state) {
+    const newLoc = {
+      pathname: patch.pathname,
+      hash: patch.hash,
+      search: patch.search
+    }
+    newLoc.href = createHref(newLoc)
+    return newLoc
+  } else if (typeof patch === 'string') {
+    const newLoc = parseUrl(patch)
+    newLoc.href = createHref(newLoc)
+    return newLoc
+  } else {
+    const newLoc = xtend(state, patch)
+    newLoc.href = createHref(newLoc)
+    return newLoc
+  }
+
+  // compute a href similar to node's href
+  // (obj) -> str
+  function createHref (location) {
+    var ret = location.pathname
+    if (location.hash) ret += (location.hash)
+    if (location.search) ret += (location.search)
+    return ret
+  }
+
+  // parse a URL into a kv object inside the browser
+  // str -> obj
+  function parseUrl (url) {
+    const a = document.createElement('a')
+    a.href = url
+
+    return {
+      href: a.pathname,
+      search: a.search,
+      hash: a.hash
+    }
   }
 }
