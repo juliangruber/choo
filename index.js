@@ -148,33 +148,52 @@ function choo (opts) {
 function appInit (opts) {
   const loc = document.location
   const state = { pathname: (opts.hash) ? hashMatch(loc.hash) : loc.href }
+
+  // allow listening to hash changes
+  // allow listening to browser back / forward buttons
+  // allow listening to anchor tag clicks
+  const subs = {}
+  if (opts.hash === true) {
+    subs.handleHash = function (send, done) {
+      hash(function navigate (pathname) {
+        pathname = hashMatch(pathname)
+        send('location:setLocation', { location: pathname }, done)
+      })
+    }
+  } else {
+    if (opts.history !== false) {
+      subs.handleHistory = function (send, done) {
+        history(function navigate (pathname) {
+          send('location:setLocation', { location: pathname }, done)
+        })
+      }
+    }
+
+    if (opts.href !== false) {
+      subs.handleHref = function (send, done) {
+        href(function navigate (pathname) {
+          send('location:setLocation', { location: pathname }, done)
+        })
+      }
+    }
+  }
+
+  const effects = {
+    setLocation: function setLocation (data, state, send, done) {
+      const href = data.location.replace(/#.*/, '')
+
+      if (!opts.history) return done()
+      if (window.location.pathname === href) return done()
+
+      window.history.pushState({}, null, href)
+      send('location:updateHref', href, done)
+    }
+  }
+
   const reducers = {
     updateHref: function (data, state) {
       return { pathname: data }
     }
-  }
-  const effects = {
-    setLocation: function setLocation (data, state, send, done) {
-      const href = data.location.replace(/#.*/, '')
-      if (window.location.pathname !== href) {
-        window.history.pushState({}, null, href)
-        send('location:updateHref', href, done)
-      } else {
-        done()
-      }
-    }
-  }
-  // if hash routing explicitly enabled, subscribe to it
-  const subs = {}
-  if (opts.hash === true) {
-    pushLocationSub(function (navigate) {
-      hash(function (fragment) {
-        navigate(hashMatch(fragment))
-      })
-    }, 'handleHash', subs)
-  } else {
-    if (opts.history !== false) pushLocationSub(history, 'handleHistory', subs)
-    if (opts.href !== false) pushLocationSub(href, 'handleHref', subs)
   }
 
   return {
@@ -183,16 +202,5 @@ function appInit (opts) {
     reducers: reducers,
     effects: effects,
     state: state
-  }
-
-  // create a new subscription that modifies
-  // 'app:location' and push it to be loaded
-  // (fn, obj) -> null
-  function pushLocationSub (cb, key, model) {
-    model[key] = function (send, done) {
-      cb(function navigate (pathname) {
-        send('location:setLocation', { location: pathname }, done)
-      })
-    }
   }
 }
